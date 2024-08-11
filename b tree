@@ -1,0 +1,368 @@
+#include <stdio.h>      // Pustaka standar untuk operasi input-output
+#include <stdlib.h>     // Pustaka standar untuk alokasi memori dan fungsi umum lainnya
+#include <string.h>     // Pustaka standar untuk manipulasi string
+
+#define MAX 3           // Maksimum jumlah elemen dalam satu node B-tree (order - 1)
+#define MIN 2           // Minimum jumlah elemen dalam satu node B-tree
+
+// Struktur data untuk menyimpan informasi produk
+typedef struct Product {
+    int productID;             // Menyimpan ID unik untuk produk
+    char name[100];            // Menyimpan nama produk
+    char category[50];         // Menyimpan kategori produk
+    float price;               // Menyimpan harga produk
+    int stock;                 // Menyimpan jumlah stok produk
+    char vendor[100];          // Menyimpan nama vendor/penjual produk
+} Product;
+
+// Struktur node B-tree
+typedef struct BTreeNode {
+    int count;                 // Menyimpan jumlah produk yang ada dalam node
+    Product products[MAX+1];   // Array untuk menyimpan produk (MAX+1 untuk mendukung overflow)
+    struct BTreeNode* link[MAX+1]; // Array pointer untuk menghubungkan node dengan anak-anaknya
+} BTreeNode;
+
+BTreeNode *root = NULL;        // Inisialisasi root dari B-tree sebagai NULL
+
+// Fungsi untuk membuat produk baru berdasarkan input pengguna
+Product createProduct(int id, char* name, char* category, float price, int stock, char* vendor) {
+    Product newProduct;
+    newProduct.productID = id;                // Mengatur ID produk
+    strcpy(newProduct.name, name);            // Menyalin nama produk
+    strcpy(newProduct.category, category);    // Menyalin kategori produk
+    newProduct.price = price;                 // Mengatur harga produk
+    newProduct.stock = stock;                 // Mengatur jumlah stok
+    strcpy(newProduct.vendor, vendor);        // Menyalin nama vendor
+    return newProduct;                        // Mengembalikan produk yang telah dibuat
+}
+
+// Fungsi untuk menyisipkan produk ke dalam node B-tree pada posisi yang benar
+void insertNode(Product product, BTreeNode *node, BTreeNode *child) {
+    int i = node->count; // Mulai dari elemen terakhir dalam node
+    // Menggeser produk dan pointer untuk memberi ruang bagi produk baru
+    while (i > 0 && product.productID < node->products[i - 1].productID) {
+        node->products[i] = node->products[i - 1];
+        node->link[i + 1] = node->link[i];
+        i--;
+    }
+    node->products[i] = product;     // Menyisipkan produk di posisi yang sesuai
+    node->link[i + 1] = child;       // Menghubungkan node anak jika ada
+    node->count++;                   // Menambahkan jumlah produk dalam node
+}
+
+// Fungsi untuk membagi node jika penuh
+void splitNode(Product product, Product* upProduct, int pos, BTreeNode* node, BTreeNode* child, BTreeNode** newNode) {
+    int median = (pos > MIN) ? MIN + 1 : MIN;  // Menentukan posisi median
+    *newNode = (BTreeNode*) malloc(sizeof(BTreeNode)); // Alokasi memori untuk node baru
+    int i;
+
+    // Memindahkan produk dan pointer ke node baru
+    for (i = median + 1; i < MAX; i++) {
+        (*newNode)->products[i - (median + 1)] = node->products[i];
+        (*newNode)->link[i - (median + 1)] = node->link[i];
+    }
+    (*newNode)->count = MAX - median - 1;   // Mengatur jumlah elemen dalam node baru
+    node->count = median;                   // Mengurangi jumlah elemen dalam node lama
+    if (pos <= MIN) {
+        insertNode(product, node, child);   // Menyisipkan produk ke node lama
+    } else {
+        insertNode(product, *newNode, child); // Menyisipkan produk ke node baru
+    }
+    *upProduct = node->products[node->count - 1]; // Produk median diangkat ke atas
+    (*newNode)->link[0] = node->link[node->count]; // Menyambungkan anak node baru
+    node->count--;                            // Mengurangi jumlah elemen dalam node lama
+}
+
+// Fungsi utama untuk menyisipkan produk ke dalam B-tree
+int insertProduct(Product product, Product* upProduct, BTreeNode* node, BTreeNode** child) {
+    int pos;
+    if (node == NULL) {   // Jika node kosong, produk menjadi root
+        *upProduct = product;
+        *child = NULL;
+        return 1;         // Menandakan bahwa node baru harus dibuat
+    }
+    // Menemukan posisi yang sesuai untuk produk baru
+    if (product.productID < node->products[0].productID) {
+        pos = 0;
+    } else {
+        for (pos = node->count - 1; pos > 0 && product.productID < node->products[pos].productID; pos--);
+        pos++;
+    }
+    // Rekursif memasukkan produk ke anak yang sesuai
+    if (insertProduct(product, upProduct, node->link[pos], child)) {
+        if (node->count < MAX) {  // Jika node tidak penuh
+            insertNode(*upProduct, node, *child);
+            return 0;             // Tidak perlu membagi node
+        } else {
+            splitNode(*upProduct, upProduct, pos, node, *child, child); // Membagi node
+            return 1;             // Node harus dibagi
+        }
+    }
+    return 0;  // Tidak ada pembagian yang diperlukan
+}
+
+// Fungsi untuk memulai penyisipan produk ke dalam B-tree
+void insert(Product product) {
+    Product upProduct;
+    BTreeNode *child;
+    int flag = insertProduct(product, &upProduct, root, &child);
+    if (flag) {   // Jika root baru diperlukan
+        BTreeNode* newRoot = (BTreeNode*) malloc(sizeof(BTreeNode));
+        newRoot->count = 1;
+        newRoot->products[0] = upProduct;
+        newRoot->link[0] = root;
+        newRoot->link[1] = child;
+        root = newRoot;   // Mengatur node baru sebagai root
+    }
+}
+
+// Fungsi untuk menghapus produk dari node B-tree
+void deleteFromNode(BTreeNode *node, int pos) {
+    for (int i = pos + 1; i < node->count; i++) {
+        node->products[i - 1] = node->products[i];
+        node->link[i] = node->link[i + 1];
+    }
+    node->count--; // Mengurangi jumlah elemen dalam node
+}
+
+// Fungsi untuk menghapus produk dari node daun
+void deleteFromLeaf(BTreeNode *node, int pos) {
+    deleteFromNode(node, pos); // Menghapus produk dari node daun
+}
+
+// Fungsi untuk menyalin produk pengganti dari subtree kanan
+void copySuccessor(BTreeNode *node, int pos) {
+    BTreeNode *temp = node->link[pos + 1];
+    while (temp->link[0] != NULL) {
+        temp = temp->link[0];
+    }
+    node->products[pos] = temp->products[0]; // Menyalin pengganti ke node
+}
+
+// Fungsi untuk mengembalikan properti B-tree setelah penghapusan
+void restore(BTreeNode *node, int pos) {
+    if (pos != 0 && node->link[pos - 1]->count > MIN) {
+        borrowFromPrev(node, pos);
+    } else if (pos != node->count && node->link[pos + 1]->count > MIN) {
+        borrowFromNext(node, pos);
+    } else {
+        if (pos != node->count) {
+            mergeNodes(node, pos);
+        } else {
+            mergeNodes(node, pos - 1);
+        }
+    }
+}
+
+// Fungsi untuk meminjam satu elemen dari saudara sebelumnya
+void borrowFromPrev(BTreeNode *node, int pos) {
+    BTreeNode *child = node->link[pos];
+    BTreeNode *sibling = node->link[pos - 1];
+
+    for (int i = child->count - 1; i >= 0; --i) {
+        child->products[i + 1] = child->products[i];
+    }
+    if (child->link[0] != NULL) {
+        for (int i = child->count; i >= 0; --i) {
+            child->link[i + 1] = child->link[i];
+        }
+    }
+    child->products[0] = node->products[pos - 1];
+    if (child->link[0] != NULL) {
+        child->link[0] = sibling->link[sibling->count];
+    }
+    node->products[pos - 1] = sibling->products[sibling->count - 1];
+    child->count += 1;
+    sibling->count -= 1;
+}
+
+// Fungsi untuk meminjam satu elemen dari saudara berikutnya
+void borrowFromNext(BTreeNode *node, int pos) {
+    BTreeNode *child = node->link[pos];
+    BTreeNode *sibling = node->link[pos + 1];
+
+    child->products[child->count] = node->products[pos];
+    if (child->link[0] != NULL) {
+        child->link[child->count + 1] = sibling->link[0];
+    }
+    node->products[pos] = sibling->products[0];
+    for (int i = 1; i < sibling->count; ++i) {
+        sibling->products[i - 1] = sibling->products[i];
+    }
+    if (sibling->link[0] != NULL) {
+        for (int i = 1; i <= sibling->count; ++i) {
+            sibling->link[i - 1] = sibling->link[i];
+        }
+    }
+    child->count += 1;
+    sibling->count -= 1;
+}
+
+// Fungsi untuk menggabungkan node dengan saudaranya
+void mergeNodes(BTreeNode *node, int pos) {
+    BTreeNode *child = node->link[pos];
+    BTreeNode *sibling = node->link[pos + 1];
+
+    child->products[MIN] = node->products[pos];
+    for (int i = 0; i < sibling->count; ++i) {
+        child->products[i + MIN + 1] = sibling->products[i];
+    }
+    if (child->link[0] != NULL) {
+        for (int i = 0; i <= sibling->count; ++i) {
+            child->link[i + MIN + 1] = sibling->link[i];
+        }
+    }
+    for (int i = pos + 1; i < node->count; ++i) {
+        node->products[i - 1] = node->products[i];
+    }
+    for (int i = pos + 2; i <= node->count; ++i) {
+        node->link[i - 1] = node->link[i];
+    }
+    child->count += sibling->count + 1;
+    node->count--;
+
+    free(sibling); // Membebaskan memori dari sibling
+}
+
+// Fungsi utama untuk menghapus produk dari B-tree
+void deleteProduct(BTreeNode *node, int id) {
+    int pos = 0;
+    while (pos < node->count && id > node->products[pos].productID) {
+        pos++;
+    }
+    if (pos < node->count && id == node->products[pos].productID) {
+        if (node->link[0] == NULL) {
+            deleteFromLeaf(node, pos);
+        } else {
+            copySuccessor(node, pos);
+            deleteProduct(node->link[pos + 1], node->products[pos].productID);
+        }
+    } else {
+        if (node->link[0] == NULL) {
+            printf("Product not found\n");
+            return;
+        }
+        int flag = (pos == node->count);
+        if (node->link[pos]->count < MIN) {
+            restore(node, pos);
+        }
+        if (flag && pos > node->count) {
+            deleteProduct(node->link[pos - 1], id);
+        } else {
+            deleteProduct(node->link[pos], id);
+        }
+    }
+}
+
+// Fungsi untuk memulai proses penghapusan produk
+void delete(int id) {
+    if (!root) {
+        printf("The tree is empty\n");
+        return;
+    }
+    deleteProduct(root, id);
+    if (root->count == 0) {
+        BTreeNode *temp = root;
+        if (root->link[0]) {
+            root = root->link[0];
+        } else {
+            root = NULL;
+        }
+        free(temp);
+    }
+}
+
+// Fungsi untuk mencari produk berdasarkan Product ID
+void search(int id, BTreeNode* node) {
+    if (!node) {
+        printf("Product not found\n");
+        return;
+    }
+
+    int pos = 0;
+    while (pos < node->count && id > node->products[pos].productID) {
+        pos++;
+    }
+    if (pos < node->count && id == node->products[pos].productID) {
+        printf("Product found: ID = %d, Name = %s, Price = %.2f\n", node->products[pos].productID, node->products[pos].name, node->products[pos].price);
+        return;
+    }
+    search(id, node->link[pos]);
+}
+
+// Fungsi untuk menampilkan B-tree secara inorder (menampilkan semua produk secara berurutan)
+void inorderTraversal(BTreeNode* node) {
+    if (node != NULL) {
+        for (int i = 0; i < node->count; i++) {
+            inorderTraversal(node->link[i]);  // Kunjungi anak kiri
+            // Cetak produk dalam node
+            printf("Product ID: %d, Name: %s, Price: %.2f\n", node->products[i].productID, node->products[i].name, node->products[i].price);
+        }
+        inorderTraversal(node->link[node->count]);  // Kunjungi anak kanan
+    }
+}
+
+// Fungsi untuk mendapatkan input dari pengguna
+void userInput() {
+    int choice, id, stock;
+    float price;
+    char name[100], category[50], vendor[100];
+    
+    while(1) {
+        printf("\n1. Insert Product\n2. Delete Product\n3. Search Product\n4. Display All Products\n5. Exit\nEnter your choice: ");
+        scanf("%d", &choice);
+        
+        switch(choice) {
+            case 1:
+                // Input produk dari pengguna
+                printf("Enter Product ID: ");
+                scanf("%d", &id);
+                printf("Enter Product Name: ");
+                scanf(" %[^\n]", name);
+                printf("Enter Product Category: ");
+                scanf(" %[^\n]", category);
+                printf("Enter Product Price: ");
+                scanf("%f", &price);
+                printf("Enter Product Stock: ");
+                scanf("%d", &stock);
+                printf("Enter Vendor Name: ");
+                scanf(" %[^\n]", vendor);
+                
+                // Buat produk baru dan sisipkan ke dalam B-tree
+                insert(createProduct(id, name, category, price, stock, vendor));
+                break;
+                
+            case 2:
+                // Menghapus produk berdasarkan ID
+                printf("Enter Product ID to delete: ");
+                scanf("%d", &id);
+                delete(id);
+                break;
+                
+            case 3:
+                // Mencari produk berdasarkan ID
+                printf("Enter Product ID to search: ");
+                scanf("%d", &id);
+                search(id, root);
+                break;
+                
+            case 4:
+                // Menampilkan semua produk dalam B-tree secara inorder
+                printf("Inorder traversal of B-tree:\n");
+                inorderTraversal(root);
+                break;
+                
+            case 5:
+                // Keluar dari program
+                exit(0);
+                
+            default:
+                printf("Invalid choice! Please try again.\n");
+        }
+    }
+}
+
+int main() {
+    userInput();  // Memulai antarmuka pengguna untuk mengelola produk
+    return 0;
+}
